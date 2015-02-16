@@ -14,6 +14,7 @@ import types
 import time
 import signal
 import traceback
+from struct import pack, unpack
 try:
     import cPickle as pickle
 except:
@@ -3300,6 +3301,99 @@ class PEDACmd(object):
 
         return
 
+    def printosv(self, *arg):
+        """
+        Another memory dumper
+        Usage:
+            MYNAME address size
+        """
+
+        def is_ascii(ch):
+            if ord(ch) >= 0x20 and ord(ch) < 0x7e:
+                return True
+            else:
+                return False
+
+        (address, count) = normalize_argv(arg, 2)
+        if address is None or count is None:
+            self._missing_argument()
+
+#        if alignment is None:
+#            alignment = peda.intsize()
+
+#        if syntax is None:
+#            syntax = 'python'
+
+        start  = address
+        end    = start + count
+        offset = address
+        step   = peda.intsize()
+        if step == 4:
+            fmt_pack = '<I'
+            len_pack = '0x%08x'
+        elif step == 8:
+            fmt_pack = '<Q'
+            len_pack = '0x%016x'
+
+        print "data = ''"
+        bytes = peda.dumpmem(start, end)
+        if bytes is None:
+            warning_msg("cannot retrieve memory content")
+        else:
+            while bytes:
+                buf = bytes[:step]
+                text = ''
+
+                buf_int = unpack(fmt_pack, buf)[0]
+
+                if peda.is_address(buf_int):
+                    vmrange = peda.get_vmrange(buf_int)
+                    
+                    if vmrange:
+                        (st, en, perm, name) = vmrange
+                        chain = peda.examine_mem_reference(buf_int)
+                        text  = "data += pack("
+                        text += "'"+fmt_pack+"'"
+                        text += ", base + "
+                        text += len_pack % (buf_int-st)
+                        text += ") # "
+                        text += name
+                        text += " / "
+                        text += to_address(st)+"-"+to_address(en)
+                        text += " : "
+                        text += format_reference_chain(chain)
+
+#                elif is_praintable(buf):
+#                    print "haha printable"
+#                    while(buf[-1] != '\x00' and bytes):
+#                        bytes = bytes[step:]
+#                        buf = bytes[:step]
+#                        text += buf
+#                        
+#                    mess = 'structure += "'
+#                    for i in range(0, len(text)):
+#                        if is_ascii(text[i]):
+#                            mess += text[i]
+#                        else:
+#                            mess += '\\x%x' % text[i]
+#
+#                    mess += '" # len='+str(len(text))
+#
+#                    print mess
+                
+                else:
+                    text += "data += pack("
+                    text += "'"+fmt_pack+"'"
+                    text += ", "
+                    text += len_pack % unpack(fmt_pack, buf)[0]
+                    text += ") # variable "
+
+                print text
+                bytes = bytes[step:]
+
+
+        return
+
     def aslr(self, *arg):
         """
         Show/set ASLR setting of GDB
@@ -4306,13 +4400,14 @@ class PEDACmd(object):
         if "reg" in opt or "register" in opt:
             self.context_register()
 
+        # display stack content, forced in case SIGSEGV
+        if "stack" in opt or "SIGSEGV" in status:
+            self.context_stack(count)
+
         # display assembly code
         if "code" in opt:
             self.context_code(count)
 
-        # display stack content, forced in case SIGSEGV
-        if "stack" in opt or "SIGSEGV" in status:
-            self.context_stack(count)
         msg("[%s]" % ("-"*78), "blue")
         msg("Legend: %s, %s, %s, value" % (red("code"), blue("data"), green("rodata")))
 
@@ -5991,7 +6086,7 @@ Alias("reg", "peda xinfo register")
 peda.execute("set confirm off")
 peda.execute("set verbose off")
 peda.execute("set output-radix 0x10")
-peda.execute("set prompt \001%s\002" % red("\002gdb-peda$ \001")) # custom prompt
+peda.execute("set prompt \001%s\002" % (green("\002__\001") + blue("\002GDB\001") + green("\002-\001") + yellow("\002PEDA\001") + green("\002__\001") + red("\002$ \001"))) # custom prompt
 peda.execute("set height 0") # disable paging
 peda.execute("set history expansion on")
 peda.execute("set history save on") # enable history saving
