@@ -3303,9 +3303,9 @@ class PEDACmd(object):
 
     def printosv(self, *arg):
         """
-        Another memory dumper
+        Another memory dumper (goal is structures)
         Usage:
-            MYNAME address size
+            MYNAME address size [alignment]
         """
 
         def is_ascii(ch):
@@ -3314,20 +3314,17 @@ class PEDACmd(object):
             else:
                 return False
 
-        (address, count) = normalize_argv(arg, 2)
+        (address, count, alignment) = normalize_argv(arg, 3)
         if address is None or count is None:
             self._missing_argument()
 
-#        if alignment is None:
-#            alignment = peda.intsize()
+        if alignment is None:
+            alignment = 0
 
 #        if syntax is None:
 #            syntax = 'python'
 
-        start  = address
-        end    = start + count
-        offset = address
-        step   = peda.intsize()
+        step = peda.intsize()
         if step == 4:
             fmt_pack = '<I'
             len_pack = '0x%08x'
@@ -3335,14 +3332,31 @@ class PEDACmd(object):
             fmt_pack = '<Q'
             len_pack = '0x%016x'
 
+        if count % step != 0:
+            count += step - count % step
+
+        print "# DUMP " + str(count) + " bytes (" + hex(address) + "-" + hex(address+count) + ")"
         print "data = ''"
-        bytes = peda.dumpmem(start, end)
+
+        bytes = peda.dumpmem(address, address+count)
+
+        read_bytes = 0
+
         if bytes is None:
             warning_msg("cannot retrieve memory content")
+
         else:
             while bytes:
                 buf = bytes[:step]
+                bytes = bytes[step:]
+
                 text = ''
+
+                read_bytes += step
+
+                if read_bytes != 0 and read_bytes % 64 == 0:
+                    print "# OFF = " + str(read_bytes)  + " / " + hex(read_bytes)
+
 
                 buf_int = unpack(fmt_pack, buf)[0]
 
@@ -3363,24 +3377,31 @@ class PEDACmd(object):
                         text += " : "
                         text += format_reference_chain(chain)
 
-#                elif is_praintable(buf):
-#                    print "haha printable"
-#                    while(buf[-1] != '\x00' and bytes):
-#                        bytes = bytes[step:]
-#                        buf = bytes[:step]
-#                        text += buf
-#                        
-#                    mess = 'structure += "'
-#                    for i in range(0, len(text)):
-#                        if is_ascii(text[i]):
-#                            mess += text[i]
-#                        else:
-#                            mess += '\\x%x' % text[i]
-#
-#                    mess += '" # len='+str(len(text))
-#
-#                    print mess
-                
+                elif is_printable(buf):
+
+                    text += 'data += "'
+                    string = buf
+                    nextsym = bytes[:1]
+                    while is_printable(nextsym):
+                        string += nextsym
+                        bytes = bytes[1:]
+                        nextsym = bytes[:1]
+                        read_bytes += 1
+
+                    if len(string) % step == 0:
+                        also = step
+                    else:
+                        also = step - len(string) % step
+
+                    for i in range(0, also):
+                        nextsym = bytes[:1]
+                        bytes = bytes[1:]
+                        string += "\\x%02x" % unpack('B', nextsym)[0]
+                        read_bytes += 1
+                            
+                    text += string + '"\n# OFF = ' + str(read_bytes) + " / " + hex(read_bytes)
+
+
                 else:
                     text += "data += pack("
                     text += "'"+fmt_pack+"'"
@@ -3389,9 +3410,6 @@ class PEDACmd(object):
                     text += ") # variable "
 
                 print text
-                bytes = bytes[step:]
-
-
         return
 
     def aslr(self, *arg):
